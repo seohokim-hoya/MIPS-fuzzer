@@ -7,3 +7,6 @@ build/
 .omx/
 __pycache__/
 *.o
+.codex
+*.pdf
+sample/project*

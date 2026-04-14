@@ -7,8 +7,11 @@
 
 1. Put your `main.c(pp)` file in `user/`.
 2. Put other's `main.c(pp)` file in `sample/`.
+3. Then, run code below:
 
-> `./fuzz.py --preset pdf_full`.
+```python
+./fuzz.py --preset pdf_full
+```
 
 (You may need python3 to run this code)
 
