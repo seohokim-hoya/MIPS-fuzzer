@@ -5,8 +5,11 @@
 
 ## How to use
 
-1. Put your `main.c(pp)` file in `user/`
-2. Put other's `main.c(pp)` file in `sample/`
-3. run `./fuzz.py --preset pdf_full`
+1. Put your `main.c(pp)` file in `user/`.
+2. Put other's `main.c(pp)` file in `sample/`.
 
-Other details in `fuzz.py` and `mips_fuzzer/*`.
+> `./fuzz.py --preset pdf_full`.
+
+(You may need python3 to run this code)
+
+Other details in `fuzz.py`, `mips_fuzzer/*`, and `tests/`. (Ask to LLMs)
