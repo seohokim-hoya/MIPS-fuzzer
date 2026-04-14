@@ -1,0 +1,26 @@
+# Fuzzer defaults. Command-line options override these values.
+preset: default
+artifact_dir: artifacts
+iters: 0
+timeout: 2.0
+log_every: 1000
+report_coverage_every: 100
+min_data_labels: 2
+max_data_labels: 5
+min_words_per_label: 1
+max_words_per_label: 4
+min_text: 8
+max_text: 24
+max_total_data_words: 0
+max_total_text_words: 0
+edge_prob: 0.35
+allow_empty_data: false
+# TA guidance: keep `.word` single-value only for the active fuzzer path.
+allow_multi_value_word: false
+allow_negative_memory_offsets: false
+allow_zero_dest_register: false
+coverage_mode: biased
+coverage_targets:
+complexity_mode: mixed
+complexity_ramp_interval: 250
+use_small_exhaustive_first: false

@@ -1,0 +1,8 @@
+artifacts/
+sample/*.c
+sample/*.cpp
+user/*.c
+user/*.cpp
+build/
+.omx/
+__pycache__/
