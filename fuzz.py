@@ -173,6 +173,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="run deterministic representative single/pair/interactions before random generation",
     )
+    parser.add_argument(
+        "--project",
+        type=int,
+        choices=[1, 2, 3, 4],
+        default=1,
+        help="which project to fuzz: 1=assembler, 2=simulator (default: 1)",
+    )
     return parser.parse_args()
 
 
@@ -266,13 +273,35 @@ def main() -> int:
             use_small_exhaustive_first=bool(settings["use_small_exhaustive_first"]),
         )
     )
-    runner = FuzzerRunner(
-        FuzzerConfig(
+    project = args.project
+    if project in (3, 4):
+        print(f"error: project {project} is not yet implemented", file=sys.stderr)
+        return 2
+    artifact_root = Path(str(settings["artifact_dir"]))
+    timeout = float(settings["timeout"])
+    if project == 2:
+        fuzzer_config = FuzzerConfig(
             workspace_root=args.workspace,
-            artifact_root=Path(str(settings["artifact_dir"])),
-            timeout_seconds=float(settings["timeout"]),
+            artifact_root=artifact_root,
+            timeout_seconds=timeout,
+            build_command=("make", "all", "PROJECT=2"),
+            ref_executable=Path("build/ref/p2sim"),
+            user_executable=Path("build/user/p2sim"),
+            project=2,
+            ref_assembler=Path("build/ref/p1asm"),
+            sim_args=("-n", "1000"),
         )
-    )
+    else:
+        fuzzer_config = FuzzerConfig(
+            workspace_root=args.workspace,
+            artifact_root=artifact_root,
+            timeout_seconds=timeout,
+            build_command=("make", "all", "PROJECT=1"),
+            ref_executable=Path("build/ref/p1asm"),
+            user_executable=Path("build/user/p1asm"),
+            project=1,
+        )
+    runner = FuzzerRunner(fuzzer_config)
     log_every = int(settings["log_every"])
     report_coverage_every = int(settings["report_coverage_every"])
     max_iters = int(settings["iters"])
@@ -306,6 +335,7 @@ def main() -> int:
             print(f"missing executables: {joined}", file=sys.stderr)
         return 2
 
+    print(f"project: {project}")
     print(f"master-seed: {master_seed}")
     print(f"config: {config_path}")
     print(f"workspace: {runner.workspace_root}")

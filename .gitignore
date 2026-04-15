@@ -1,8 +1,6 @@
 artifacts/
-sample/*.c
-sample/*.cpp
-user/*.c
-user/*.cpp
+runfiles/**/*.c
+runfiles/**/*.cpp
 build/
 .omx/
 __pycache__/

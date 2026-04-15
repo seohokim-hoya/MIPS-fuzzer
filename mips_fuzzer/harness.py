@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import difflib
 import json
 import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .model import Program
@@ -72,8 +73,11 @@ class FuzzerConfig:
     artifact_root: Path | None = None
     timeout_seconds: float = 2.0
     build_command: tuple[str, ...] = ("make", "all")
-    ref_executable: Path = Path("build/ref/runfile")
-    user_executable: Path = Path("build/user/runfile")
+    ref_executable: Path = Path("build/ref/p1asm")
+    user_executable: Path = Path("build/user/p1asm")
+    project: int = 1
+    ref_assembler: Path | None = None
+    sim_args: tuple[str, ...] = ("-n", "1000")
 
 
 class FuzzerRunner:
@@ -88,6 +92,11 @@ class FuzzerRunner:
             self.artifact_root = (self.workspace_root / config.artifact_root).resolve()
         self.ref_executable = (self.workspace_root / config.ref_executable).resolve()
         self.user_executable = (self.workspace_root / config.user_executable).resolve()
+        self.ref_assembler = (
+            (self.workspace_root / config.ref_assembler).resolve()
+            if config.ref_assembler is not None
+            else None
+        )
 
     def build_targets(self) -> BuildResult:
         command = list(self.config.build_command)
@@ -146,11 +155,37 @@ class FuzzerRunner:
         asm_text = program.render()
         with tempfile.TemporaryDirectory(prefix="mips-fuzz-") as temp_root:
             temp_path = Path(temp_root)
-            run_ref = self._run_target("ref", self.ref_executable, temp_path / "ref", asm_text)
-            run_user = self._run_target("user", self.user_executable, temp_path / "user", asm_text)
-            failure_class, reason = classify_difference(run_ref, run_user)
-            diff_summary = build_diff_summary(run_ref, run_user, failure_class, reason)
-            self._save_last_run(
+            if self.config.project == 2:
+                return self._evaluate_p2(asm_text, seed, iteration, temp_path, program_details)
+            return self._evaluate_p1(asm_text, seed, iteration, temp_path, program_details)
+
+    def _evaluate_p1(
+        self,
+        asm_text: str,
+        seed: int,
+        iteration: int,
+        temp_path: Path,
+        program_details: dict[str, object] | None,
+    ) -> DiffResult:
+        run_ref = self._run_target("ref", self.ref_executable, temp_path / "ref", asm_text)
+        run_user = self._run_target("user", self.user_executable, temp_path / "user", asm_text)
+        failure_class, reason = classify_difference(run_ref, run_user)
+        diff_summary = build_diff_summary(run_ref, run_user, failure_class, reason)
+        self._save_last_run(
+            seed=seed,
+            iteration=iteration,
+            asm_text=asm_text,
+            failure_class=failure_class,
+            reason=reason,
+            run_ref=run_ref,
+            run_user=run_user,
+            diff_summary=diff_summary,
+            program_details=program_details,
+        )
+        interesting = failure_class is not None
+        artifact_dir = None
+        if interesting:
+            artifact_dir = self._save_artifacts(
                 seed=seed,
                 iteration=iteration,
                 asm_text=asm_text,
@@ -161,34 +196,104 @@ class FuzzerRunner:
                 diff_summary=diff_summary,
                 program_details=program_details,
             )
-            interesting = failure_class is not None
-            artifact_dir = None
-            if interesting:
-                artifact_dir = self._save_artifacts(
-                    seed=seed,
-                    iteration=iteration,
-                    asm_text=asm_text,
-                    failure_class=failure_class,
-                    reason=reason,
-                    run_ref=run_ref,
-                    run_user=run_user,
-                    diff_summary=diff_summary,
-                    program_details=program_details,
-                )
-            else:
-                diff_summary = None
+        else:
+            diff_summary = None
+        return DiffResult(
+            iteration=iteration,
+            seed=seed,
+            interesting=interesting,
+            failure_class=failure_class,
+            reason=reason,
+            artifact_dir=artifact_dir,
+            run_ref=run_ref,
+            run_user=run_user,
+            asm_text=asm_text,
+            diff_summary=diff_summary,
+        )
+
+    def _evaluate_p2(
+        self,
+        asm_text: str,
+        seed: int,
+        iteration: int,
+        temp_path: Path,
+        program_details: dict[str, object] | None,
+    ) -> DiffResult:
+        assert self.ref_assembler is not None, "ref_assembler must be set for project 2"
+        asm_dir = temp_path / "asm"
+        asm_dir.mkdir()
+        asm_input = asm_dir / "input.s"
+        asm_input.write_text(asm_text, encoding="utf-8")
+        try:
+            subprocess.run(
+                [str(self.ref_assembler), str(asm_input)],
+                cwd=asm_dir,
+                capture_output=True,
+                text=True,
+                timeout=self.config.timeout_seconds,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        obj_path = asm_dir / "input.o"
+        if not obj_path.is_file():
+            dummy = RunResult(
+                role="ref", executable=str(self.ref_assembler), command=[],
+                return_code=None, timed_out=False, stdout="", stderr="",
+                runtime_seconds=0.0, output_files=[], output_bytes=None,
+            )
             return DiffResult(
-                iteration=iteration,
+                iteration=iteration, seed=seed, interesting=False,
+                failure_class=None, reason="assembler_failed",
+                artifact_dir=None, run_ref=dummy, run_user=dummy,
+                asm_text=asm_text, diff_summary=None,
+            )
+        obj_bytes = obj_path.read_bytes()
+        sim_args = list(self.config.sim_args)
+        run_ref = self._run_sim("ref", self.ref_executable, temp_path / "ref", obj_path, sim_args)
+        run_user = self._run_sim("user", self.user_executable, temp_path / "user", obj_path, sim_args)
+        failure_class, reason = classify_difference_p2(run_ref, run_user)
+        diff_summary = build_diff_summary_p2(run_ref, run_user, failure_class, reason)
+        self._save_last_run(
+            seed=seed,
+            iteration=iteration,
+            asm_text=asm_text,
+            failure_class=failure_class,
+            reason=reason,
+            run_ref=run_ref,
+            run_user=run_user,
+            diff_summary=diff_summary,
+            program_details=program_details,
+            extra_input_files={"input.o": obj_bytes},
+        )
+        interesting = failure_class is not None
+        artifact_dir = None
+        if interesting:
+            artifact_dir = self._save_artifacts(
                 seed=seed,
-                interesting=interesting,
+                iteration=iteration,
+                asm_text=asm_text,
                 failure_class=failure_class,
                 reason=reason,
-                artifact_dir=artifact_dir,
                 run_ref=run_ref,
                 run_user=run_user,
-                asm_text=asm_text,
                 diff_summary=diff_summary,
+                program_details=program_details,
+                extra_input_files={"input.o": obj_bytes},
             )
+        else:
+            diff_summary = None
+        return DiffResult(
+            iteration=iteration,
+            seed=seed,
+            interesting=interesting,
+            failure_class=failure_class,
+            reason=reason,
+            artifact_dir=artifact_dir,
+            run_ref=run_ref,
+            run_user=run_user,
+            asm_text=asm_text,
+            diff_summary=diff_summary,
+        )
 
     def _assert_built(self) -> None:
         missing = [str(path) for path in (self.ref_executable, self.user_executable) if not path.is_file()]
@@ -258,6 +363,70 @@ class FuzzerRunner:
                 launch_error=str(exc),
             )
 
+    def _run_sim(
+        self,
+        role: str,
+        executable: Path,
+        workdir: Path,
+        obj_path: Path,
+        sim_args: list[str],
+    ) -> RunResult:
+        workdir.mkdir(parents=True, exist_ok=True)
+        local_obj = workdir / "input.o"
+        shutil.copy2(obj_path, local_obj)
+        command = [str(executable)] + sim_args + [str(local_obj)]
+        start = time.monotonic()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=self.config.timeout_seconds,
+            )
+            runtime = time.monotonic() - start
+            return RunResult(
+                role=role,
+                executable=str(executable),
+                command=command,
+                return_code=completed.returncode,
+                timed_out=False,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                runtime_seconds=runtime,
+                output_files=[],
+                output_bytes=None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            runtime = time.monotonic() - start
+            return RunResult(
+                role=role,
+                executable=str(executable),
+                command=command,
+                return_code=None,
+                timed_out=True,
+                stdout=exc.stdout or "",
+                stderr=exc.stderr or "",
+                runtime_seconds=runtime,
+                output_files=[],
+                output_bytes=None,
+            )
+        except OSError as exc:
+            runtime = time.monotonic() - start
+            return RunResult(
+                role=role,
+                executable=str(executable),
+                command=command,
+                return_code=None,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                runtime_seconds=runtime,
+                output_files=[],
+                output_bytes=None,
+                launch_error=str(exc),
+            )
+
     def _save_artifacts(
         self,
         seed: int,
@@ -269,6 +438,7 @@ class FuzzerRunner:
         run_user: RunResult,
         diff_summary: DiffSummary,
         program_details: dict[str, object] | None = None,
+        extra_input_files: dict[str, bytes] | None = None,
     ) -> Path:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         target = self.artifact_root / f"iter-{iteration:06d}-seed-{seed}-{failure_class}"
@@ -279,6 +449,9 @@ class FuzzerRunner:
         target.mkdir(parents=True, exist_ok=False)
 
         (target / "input.s").write_text(asm_text, encoding="utf-8")
+        if extra_input_files:
+            for name, data in extra_input_files.items():
+                (target / name).write_bytes(data)
         self._write_run(target, run_ref)
         self._write_run(target, run_user)
         (target / "diff.txt").write_text(diff_summary.text + "\n", encoding="utf-8")
@@ -287,6 +460,7 @@ class FuzzerRunner:
             "iteration": iteration,
             "failure_class": failure_class,
             "reason": reason,
+            "project": self.config.project,
             "workspace_root": str(self.workspace_root),
             "command_ref": run_ref.command,
             "command_user": run_user.command,
@@ -317,6 +491,7 @@ class FuzzerRunner:
         run_user: RunResult,
         diff_summary: DiffSummary,
         program_details: dict[str, object] | None = None,
+        extra_input_files: dict[str, bytes] | None = None,
     ) -> Path:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         target = self.artifact_root / "last_run"
@@ -325,6 +500,9 @@ class FuzzerRunner:
             shutil.rmtree(temp_target)
         temp_target.mkdir(parents=True, exist_ok=False)
         (temp_target / "input.s").write_text(asm_text, encoding="utf-8")
+        if extra_input_files:
+            for name, data in extra_input_files.items():
+                (temp_target / name).write_bytes(data)
         self._write_run(temp_target, run_ref)
         self._write_run(temp_target, run_user)
         (temp_target / "diff.txt").write_text(diff_summary.text + "\n", encoding="utf-8")
@@ -333,6 +511,7 @@ class FuzzerRunner:
             "iteration": iteration,
             "failure_class": failure_class,
             "reason": reason,
+            "project": self.config.project,
             "workspace_root": str(self.workspace_root),
             "command_ref": run_ref.command,
             "command_user": run_user.command,
@@ -554,3 +733,49 @@ def _byte_window(ref_bytes: bytes, user_bytes: bytes, index: int, radius: int = 
         "ref_hex": ref_bytes[start:end].hex(),
         "user_hex": user_bytes[start:end].hex(),
     }
+
+
+def classify_difference_p2(run_ref: RunResult, run_user: RunResult) -> tuple[str | None, str]:
+    if run_ref.launch_error != run_user.launch_error:
+        return "crash", "launcher failure differed between targets"
+    if run_ref.timed_out != run_user.timed_out:
+        return "timeout", "exactly one target timed out"
+    if run_ref.timed_out and run_user.timed_out:
+        return None, "both targets timed out"
+    if run_ref.return_code != run_user.return_code:
+        return "crash", "return codes differed"
+    if run_ref.stdout != run_user.stdout:
+        return "output_mismatch", "stdout output differed"
+    return None, "no differential behavior observed"
+
+
+def build_diff_summary_p2(
+    run_ref: RunResult,
+    run_user: RunResult,
+    failure_class: str | None,
+    reason: str,
+) -> DiffSummary:
+    details: dict[str, object] = {
+        "failure_class": failure_class,
+        "reason": reason,
+        "ref_return_code": run_ref.return_code,
+        "user_return_code": run_user.return_code,
+        "ref_timed_out": run_ref.timed_out,
+        "user_timed_out": run_user.timed_out,
+    }
+    lines = [
+        f"failure-class: {failure_class}",
+        f"reason: {reason}",
+        f"ref: return={run_ref.return_code} timeout={run_ref.timed_out}",
+        f"user: return={run_user.return_code} timeout={run_user.timed_out}",
+    ]
+    ref_lines = run_ref.stdout.splitlines(keepends=True)
+    user_lines = run_user.stdout.splitlines(keepends=True)
+    diff_lines = list(
+        difflib.unified_diff(ref_lines, user_lines, fromfile="ref.stdout", tofile="user.stdout", n=3)
+    )
+    details["stdout_diff_lines"] = len(diff_lines)
+    if diff_lines:
+        lines.append("--- stdout diff ---")
+        lines.extend(line.rstrip("\n") for line in diff_lines)
+    return DiffSummary(text="\n".join(lines), details=details)
