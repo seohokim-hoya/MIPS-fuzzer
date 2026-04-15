@@ -57,12 +57,6 @@ def parse_args() -> argparse.Namespace:
         description="Grammar-based differential fuzzer for sample/main.c|main.cpp and user/main.c|main.cpp"
     )
     parser.add_argument(
-        "--preset",
-        choices=sorted(PRESET_SETTINGS),
-        default=None,
-        help="generation preset; command-line preset overrides config.yml preset",
-    )
-    parser.add_argument(
         "--workspace",
         type=Path,
         default=Path("."),
@@ -191,15 +185,9 @@ def resolve_settings(args: argparse.Namespace) -> tuple[Path, dict[str, object]]
 
     loaded = load_config(config_path)
     settings: dict[str, object] = dict(DEFAULT_CONFIG)
-    loaded_preset = str(loaded.get("preset", DEFAULT_CONFIG["preset"]))
-    if args.preset is None and loaded_preset != "default":
-        settings.update(_preset_settings(loaded_preset))
+    settings.update(_preset_settings("pdf_full"))
     settings.update({key: value for key, value in loaded.items() if key != "preset"})
-    if args.preset is not None:
-        settings.update(_preset_settings(args.preset))
-        settings["preset"] = args.preset
-    else:
-        settings["preset"] = loaded_preset
+    settings["preset"] = "pdf_full"
 
     overrides = {
         "artifact_dir": args.artifact_dir,

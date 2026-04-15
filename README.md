@@ -56,11 +56,10 @@ cp student_parse.c runfiles/Project-2/user/parse.c
 ## 주요 옵션
 
 ```
---project N       테스트할 프로젝트 번호 (1 또는 2, 기본값: 1)
---iters N         반복 횟수 (0 = 무한, 기본값: 0)
---preset pdf_full 강의 채점 기준에 맞는 확장 설정
---seed N          재현 가능한 테스트를 위한 시드 고정
---timeout N       실행 제한 시간(초) (기본값: 2.0)
+--project N    테스트할 프로젝트 번호 (1 또는 2, 기본값: 1)
+--iters N      반복 횟수 (0 = 무한, 기본값: 0)
+--seed N       재현 가능한 테스트를 위한 시드 고정
+--timeout N    실행 제한 시간(초) (기본값: 2.0)
 ```
 
 ---
