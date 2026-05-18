@@ -8,10 +8,13 @@ LDLIBS   ?=
 PROJECT  ?= 1
 
 SHARED_P2 := shared/Project-2
+SHARED_P3 := shared/Project-3
 REF_P1    := runfiles/Project-1/ref
 USER_P1   := runfiles/Project-1/user
 REF_P2    := runfiles/Project-2/ref
 USER_P2   := runfiles/Project-2/user
+REF_P3    := runfiles/Project-3/ref
+USER_P3   := runfiles/Project-3/user
 
 .PHONY: all ref user p1ref clean
 
@@ -45,6 +48,37 @@ user:
 		$(SHARED_P2)/cs311.c $(SHARED_P2)/util.c \
 		$(USER_P2)/run.c $(USER_P2)/parse.c \
 		-I$(SHARED_P2) $(LDLIBS) -o build/user/p2sim
+
+else ifeq ($(PROJECT),3)
+
+all: p1ref ref user
+
+p1ref:
+	@mkdir -p build/ref
+	@set -eu; \
+	if [ -f $(REF_P1)/main.c ] && [ -f $(REF_P1)/main.cpp ]; then \
+		echo "multiple entry files: $(REF_P1)/main.c and $(REF_P1)/main.cpp" >&2; exit 1; \
+	elif [ -f $(REF_P1)/main.c ]; then \
+		$(CC) -x c $(CPPFLAGS) $(CFLAGS) $(REF_P1)/main.c $(LDFLAGS) $(LDLIBS) -o build/ref/p1asm; \
+	elif [ -f $(REF_P1)/main.cpp ]; then \
+		$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(REF_P1)/main.cpp $(LDFLAGS) $(LDLIBS) -o build/ref/p1asm; \
+	else \
+		echo "missing $(REF_P1)/main.c or $(REF_P1)/main.cpp" >&2; exit 1; \
+	fi
+
+ref:
+	@mkdir -p build/ref
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) \
+		$(SHARED_P3)/cs311.c $(SHARED_P3)/util.c $(SHARED_P3)/parse.c \
+		$(REF_P3)/run.c \
+		-I$(REF_P3) -I$(SHARED_P3) $(LDLIBS) -o build/ref/p3sim
+
+user:
+	@mkdir -p build/user
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) \
+		$(SHARED_P3)/cs311.c $(SHARED_P3)/util.c $(SHARED_P3)/parse.c \
+		$(USER_P3)/run.c \
+		-I$(USER_P3) -I$(SHARED_P3) $(LDLIBS) -o build/user/p3sim
 
 else
 

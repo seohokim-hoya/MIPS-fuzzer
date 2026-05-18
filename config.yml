@@ -19,6 +19,8 @@ allow_empty_data: true
 allow_multi_value_word: false
 allow_negative_memory_offsets: true
 allow_zero_dest_register: true
+allow_jr: false
+allow_backward_control_flow: false
 coverage_mode: coverage_first
 coverage_targets:
 complexity_mode: mixed

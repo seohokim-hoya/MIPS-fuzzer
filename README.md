@@ -19,10 +19,11 @@ artifacts/          ← 차이가 발생한 테스트 케이스 저장
 
 ### 프로젝트별 파일 위치
 
-| 프로젝트              | ref/                   | user/                  | shared/                    |
-| --------------------- | ---------------------- | ---------------------- | -------------------------- |
-| **P1** MIPS Assembler | `main.c` or `main.cpp` | `main.c` or `main.cpp` | (없음)                     |
-| **P2** MIPS Simulator | `run.c`, `parse.c`     | `run.c`, `parse.c`     | `cs311.c`, `util.c`, `*.h` |
+| 프로젝트              | ref/                       | user/                      | shared/                                   |
+| --------------------- | -------------------------- | -------------------------- | ----------------------------------------- |
+| **P1** MIPS Assembler | `main.c` or `main.cpp`     | `main.c` or `main.cpp`     | (없음)                                    |
+| **P2** MIPS Simulator | `run.c`, `parse.c`         | `run.c`, `parse.c`         | `cs311.c`, `util.c`, `*.h`                |
+| **P3** Pipeline Sim   | `run.c`, `run.h`, `util.h` | `run.c`, `run.h`, `util.h` | `cs311.c`, `parse.c`, `parse.h`, `util.c` |
 
 ---
 
@@ -49,6 +50,18 @@ cp student_parse.c runfiles/Project-2/user/parse.c
 ./fuzz.py --project 2
 ```
 
+### Project 3 — MIPS Pipelined Simulator
+
+```bash
+# 1. 테스트할 제출물을 user/ 에 배치
+cp student_run.c  runfiles/Project-3/user/run.c
+cp student_run.h  runfiles/Project-3/user/run.h
+cp student_util.h runfiles/Project-3/user/util.h
+
+# 2. 실행
+./fuzz.py --project 3
+```
+
 다른 학생 제출물로 교체하려면 `user/` 안의 파일만 바꾸고 다시 실행하면 된다.
 
 ---
@@ -56,7 +69,7 @@ cp student_parse.c runfiles/Project-2/user/parse.c
 ## 주요 옵션
 
 ```
---project N    테스트할 프로젝트 번호 (1 또는 2, 기본값: 1)
+--project N    테스트할 프로젝트 번호 (1, 2, 또는 3, 기본값: 1)
 --iters N      반복 횟수 (0 = 무한, 기본값: 0)
 --seed N       재현 가능한 테스트를 위한 시드 고정
 --timeout N    실행 제한 시간(초) (기본값: 2.0)

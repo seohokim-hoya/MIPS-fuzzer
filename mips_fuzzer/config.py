@@ -23,6 +23,8 @@ DEFAULT_CONFIG: dict[str, object] = {
     "allow_multi_value_word": False,
     "allow_negative_memory_offsets": False,
     "allow_zero_dest_register": False,
+    "allow_jr": True,
+    "allow_backward_control_flow": True,
     "coverage_mode": "biased",
     "coverage_targets": (),
     "complexity_mode": "mixed",
@@ -62,6 +64,8 @@ def _coerce_value(key: str, raw_value: str) -> object:
         "allow_multi_value_word",
         "allow_negative_memory_offsets",
         "allow_zero_dest_register",
+        "allow_jr",
+        "allow_backward_control_flow",
         "use_small_exhaustive_first",
     }:
         return _parse_bool(key, value)

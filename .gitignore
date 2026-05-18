@@ -1,6 +1,8 @@
 artifacts/
 runfiles/**/*.c
+runfiles/**/*.h
 runfiles/**/*.cpp
+runfiles/**/*.hpp
 build/
 .omx/
 __pycache__/

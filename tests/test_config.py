@@ -22,6 +22,8 @@ class ConfigTests(unittest.TestCase):
                         "report_coverage_every: 11",
                         "allow_empty_data: true",
                         "allow_negative_memory_offsets: yes",
+                        "allow_jr: no",
+                        "allow_backward_control_flow: off",
                         "coverage_mode: coverage_first",
                         "coverage_targets: opcode:lw, mem_offset:negative",
                         "complexity_mode: hard",
@@ -41,6 +43,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config["report_coverage_every"], 11)
             self.assertTrue(config["allow_empty_data"])
             self.assertTrue(config["allow_negative_memory_offsets"])
+            self.assertFalse(config["allow_jr"])
+            self.assertFalse(config["allow_backward_control_flow"])
             self.assertEqual(config["coverage_mode"], "coverage_first")
             self.assertEqual(config["coverage_targets"], ("opcode:lw", "mem_offset:negative"))
             self.assertEqual(config["complexity_mode"], "hard")

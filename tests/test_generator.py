@@ -31,6 +31,8 @@ class GeneratorTests(unittest.TestCase):
             allow_multi_value_word=False,
             allow_negative_memory_offsets=True,
             allow_zero_dest_register=True,
+            allow_jr=True,
+            allow_backward_control_flow=True,
             coverage_mode="coverage_first",
             complexity_mode="mixed",
             use_small_exhaustive_first=True,
@@ -108,6 +110,58 @@ class GeneratorTests(unittest.TestCase):
             "sw",
         ]}
         self.assertTrue(expected <= seen)
+
+    def test_generator_can_disable_jr_for_stable_comparisons(self) -> None:
+        config = GeneratorConfig(
+            min_data_labels=0,
+            max_data_labels=4,
+            min_words_per_label=1,
+            max_words_per_label=4,
+            min_text_instructions=1,
+            max_text_instructions=24,
+            allow_empty_data=True,
+            allow_negative_memory_offsets=True,
+            allow_zero_dest_register=True,
+            allow_jr=False,
+            allow_backward_control_flow=True,
+            coverage_mode="coverage_first",
+            complexity_mode="hard",
+            use_small_exhaustive_first=True,
+        )
+        generator = ProgramGenerator(config)
+        self.assertNotIn("opcode:jr", resolve_coverage_targets(config))
+        self.assertFalse(any("opcode:jr" in tag for tag in resolve_pairwise_targets(config)))
+        self.assertFalse(any("opcode:jr" in tag for tag in resolve_priority_triple_targets(config)))
+        for seed in range(100):
+            program = generator.generate(seed, complexity_tier="hard")
+            coverage = collect_program_coverage(program, complexity_tier="hard")
+            self.assertNotIn("opcode:jr", coverage.tags)
+
+    def test_generator_can_disable_backward_control_flow(self) -> None:
+        config = GeneratorConfig(
+            min_data_labels=0,
+            max_data_labels=4,
+            min_words_per_label=1,
+            max_words_per_label=4,
+            min_text_instructions=1,
+            max_text_instructions=24,
+            allow_empty_data=True,
+            allow_negative_memory_offsets=True,
+            allow_zero_dest_register=True,
+            allow_jr=False,
+            allow_backward_control_flow=False,
+            coverage_mode="coverage_first",
+            complexity_mode="hard",
+            use_small_exhaustive_first=True,
+        )
+        generator = ProgramGenerator(config)
+        self.assertNotIn("branch:backward", resolve_coverage_targets(config))
+        self.assertFalse(any("branch:backward" in tag for tag in resolve_pairwise_targets(config)))
+        self.assertFalse(any("branch:backward" in tag for tag in resolve_priority_triple_targets(config)))
+        for seed in range(100):
+            program = generator.generate(seed, complexity_tier="hard")
+            coverage = collect_program_coverage(program, complexity_tier="hard")
+            self.assertNotIn("branch:backward", coverage.tags)
 
     def test_pairwise_targets_are_resolved_and_observable(self) -> None:
         pairwise_targets = resolve_pairwise_targets(self.config)

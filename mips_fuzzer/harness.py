@@ -155,7 +155,7 @@ class FuzzerRunner:
         asm_text = program.render()
         with tempfile.TemporaryDirectory(prefix="mips-fuzz-") as temp_root:
             temp_path = Path(temp_root)
-            if self.config.project == 2:
+            if self.config.project in (2, 3):
                 return self._evaluate_p2(asm_text, seed, iteration, temp_path, program_details)
             return self._evaluate_p1(asm_text, seed, iteration, temp_path, program_details)
 
@@ -219,7 +219,7 @@ class FuzzerRunner:
         temp_path: Path,
         program_details: dict[str, object] | None,
     ) -> DiffResult:
-        assert self.ref_assembler is not None, "ref_assembler must be set for project 2"
+        assert self.ref_assembler is not None, "ref_assembler must be set for simulator projects"
         asm_dir = temp_path / "asm"
         asm_dir.mkdir()
         asm_input = asm_dir / "input.s"

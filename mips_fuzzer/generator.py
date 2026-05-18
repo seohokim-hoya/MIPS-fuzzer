@@ -106,6 +106,8 @@ class GeneratorConfig:
     allow_multi_value_word: bool = False
     allow_negative_memory_offsets: bool = False
     allow_zero_dest_register: bool = False
+    allow_jr: bool = True
+    allow_backward_control_flow: bool = True
     coverage_mode: str = "biased"
     coverage_targets: tuple[str, ...] = ()
     complexity_mode: str = "mixed"
@@ -136,6 +138,10 @@ class GeneratorConfig:
         if unknown_targets:
             joined = ", ".join(sorted(unknown_targets))
             raise ValueError(f"unknown coverage targets: {joined}")
+        if not self.allow_jr and "opcode:jr" in normalized_targets:
+            raise ValueError("opcode:jr coverage target requires allow_jr")
+        if not self.allow_backward_control_flow and "branch:backward" in normalized_targets:
+            raise ValueError("branch:backward coverage target requires allow_backward_control_flow")
         self.coverage_targets = normalized_targets
         # Dormant on purpose: the TA clarified grading assumes exactly one value per .word.
         # Keep the implementation paths around, but disable multi-value generation in active runs.
@@ -495,7 +501,7 @@ class ProgramGenerator:
                 prefer_multi=False,
             )
 
-        if "branch:backward" in context.preferred_targets:
+        if self.config.allow_backward_control_flow and "branch:backward" in context.preferred_targets:
             backward_labels = [
                 label for label, position in sorted(context.label_positions.items(), key=lambda item: item[1])
                 if position == 0 or position < max(context.label_positions.values())
@@ -503,7 +509,7 @@ class ProgramGenerator:
             if backward_labels:
                 context.interaction_branch_label = backward_labels[0]
 
-        if "opcode:jal" in context.preferred_targets:
+        if self.config.allow_jr and "opcode:jal" in context.preferred_targets:
             jump_labels = [
                 label for label, position in sorted(context.label_positions.items(), key=lambda item: item[1])
                 if position > 0
@@ -630,6 +636,7 @@ class ProgramGenerator:
                 opcode
                 for opcode in ("beq", "bne", "jal", "jr", "lw", "sw", "addiu", "andi", "sll", "addu")
                 if opcode in ALL_OPCODES and (opcode != "la" or has_data_labels)
+                and (opcode != "jr" or self.config.allow_jr)
             )
             if has_data_labels:
                 required.append("la")
@@ -646,6 +653,8 @@ class ProgramGenerator:
         )
 
         allowed = sorted(ALL_OPCODES)
+        if not self.config.allow_jr:
+            allowed = [opcode for opcode in allowed if opcode != "jr"]
         if not has_data_labels:
             allowed = [opcode for opcode in allowed if opcode != "la"]
 
@@ -666,7 +675,14 @@ class ProgramGenerator:
         for index in range(instruction_count):
             if plan[index] is not None:
                 continue
-            plan[index] = self._random_opcode(rnd, allowed, complexity_tier)
+            index_allowed = allowed
+            if not self.config.allow_backward_control_flow and index == instruction_count - 1:
+                index_allowed = [
+                    opcode
+                    for opcode in allowed
+                    if opcode not in BRANCH_OPCODES | JUMP_OPCODES
+                ]
+            plan[index] = self._random_opcode(rnd, index_allowed, complexity_tier)
         return [opcode for opcode in plan if opcode is not None]
 
     def _required_opcodes(
@@ -677,6 +693,8 @@ class ProgramGenerator:
             if target.startswith("opcode:"):
                 opcode = target.split(":", 1)[1]
                 if opcode == "la" and not has_data_labels:
+                    continue
+                if opcode == "jr" and not self.config.allow_jr:
                     continue
                 required.append(opcode)
         if "branch:forward" in preferred_targets or "branch:backward" in preferred_targets:
@@ -732,6 +750,10 @@ class ProgramGenerator:
             if constrained:
                 candidates = constrained
         if opcode in BRANCH_OPCODES and "branch:forward" in preferred_targets:
+            constrained = [index for index in candidates if index < instruction_count - 1]
+            if constrained:
+                candidates = constrained
+        if not self.config.allow_backward_control_flow and opcode in BRANCH_OPCODES | JUMP_OPCODES:
             constrained = [index for index in candidates if index < instruction_count - 1]
             if constrained:
                 candidates = constrained
@@ -970,6 +992,10 @@ class ProgramGenerator:
         positions = context.label_positions
         if not positions:
             return f"text_{index}"
+        if not self.config.allow_backward_control_flow:
+            choices = [label for label, position in positions.items() if position > index]
+            if choices:
+                return context.random.choice(choices)
         if "branch:backward" in context.preferred_targets:
             choices = [label for label, position in positions.items() if position < index]
             if choices:
@@ -984,6 +1010,14 @@ class ProgramGenerator:
         return context.random.choice(context.text_labels)
 
     def _jump_target(self, context: _GenerationContext, index: int) -> str:
+        if not self.config.allow_backward_control_flow:
+            choices = [
+                label
+                for label, position in context.label_positions.items()
+                if position > index
+            ]
+            if choices:
+                return context.random.choice(choices)
         choices = [label for label, position in context.label_positions.items() if position != index]
         if choices:
             return context.random.choice(choices)
@@ -1256,12 +1290,16 @@ def resolve_coverage_targets(config: GeneratorConfig) -> set[str]:
         return set(config.coverage_targets)
 
     targets = {f"opcode:{opcode}" for opcode in ALL_OPCODES}
+    if not config.allow_jr:
+        targets.discard("opcode:jr")
     targets.add("data:non_empty")
     targets.add("format:hex")
     targets.add("format:dec")
     targets |= SIGNED_IMMEDIATE_TARGETS
     targets |= UNSIGNED_IMMEDIATE_TARGETS
     targets |= {"branch:forward", "branch:backward"}
+    if not config.allow_backward_control_flow:
+        targets.discard("branch:backward")
     targets |= {"mem_offset:zero", "mem_offset:positive"}
     if config.allow_empty_data or config.min_data_labels == 0:
         targets.add("data:empty")

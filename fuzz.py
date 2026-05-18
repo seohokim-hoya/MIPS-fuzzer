@@ -38,6 +38,8 @@ PRESET_SETTINGS: dict[str, dict[str, object]] = {
         "allow_multi_value_word": False,
         "allow_negative_memory_offsets": True,
         "allow_zero_dest_register": True,
+        "allow_jr": False,
+        "allow_backward_control_flow": False,
         "coverage_mode": "coverage_first",
         "complexity_mode": "mixed",
         "use_small_exhaustive_first": True,
@@ -54,13 +56,13 @@ def _preset_settings(name: str) -> dict[str, object]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Grammar-based differential fuzzer for sample/main.c|main.cpp and user/main.c|main.cpp"
+        description="Grammar-based differential fuzzer for MIPS assembler and simulator projects"
     )
     parser.add_argument(
         "--workspace",
         type=Path,
         default=Path("."),
-        help="workspace root containing sample/, user/, and Makefile",
+        help="workspace root containing runfiles/, shared/, and Makefile",
     )
     parser.add_argument(
         "--config",
@@ -150,6 +152,18 @@ def parse_args() -> argparse.Namespace:
         help="allow instructions that write to register $0",
     )
     parser.add_argument(
+        "--allow-jr",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="allow generated jr instructions; disabled by the pdf_full preset to avoid uninitialized return-address cases",
+    )
+    parser.add_argument(
+        "--allow-backward-control-flow",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="allow generated branches and jumps to earlier labels; disabled by the pdf_full preset to avoid artificial max-instruction stops",
+    )
+    parser.add_argument(
         "--complexity-mode",
         choices=["simple", "mixed", "hard"],
         default=None,
@@ -170,9 +184,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         type=int,
-        choices=[1, 2, 3, 4],
+        choices=[1, 2, 3],
         default=1,
-        help="which project to fuzz: 1=assembler, 2=simulator (default: 1)",
+        help="which project to fuzz: 1=assembler, 2=single-cycle simulator, 3=pipeline simulator (default: 1)",
     )
     return parser.parse_args()
 
@@ -209,6 +223,8 @@ def resolve_settings(args: argparse.Namespace) -> tuple[Path, dict[str, object]]
         "allow_multi_value_word": args.allow_multi_value_word,
         "allow_negative_memory_offsets": args.allow_negative_memory_offsets,
         "allow_zero_dest_register": args.allow_zero_dest_register,
+        "allow_jr": args.allow_jr,
+        "allow_backward_control_flow": args.allow_backward_control_flow,
         "complexity_mode": args.complexity_mode,
         "complexity_ramp_interval": args.complexity_ramp_interval,
         "use_small_exhaustive_first": args.use_small_exhaustive_first,
@@ -252,6 +268,8 @@ def main() -> int:
                 settings["allow_negative_memory_offsets"]
             ),
             allow_zero_dest_register=bool(settings["allow_zero_dest_register"]),
+            allow_jr=bool(settings["allow_jr"]),
+            allow_backward_control_flow=bool(settings["allow_backward_control_flow"]),
             coverage_mode=str(settings["coverage_mode"]),
             coverage_targets=tuple(
                 str(target) for target in settings["coverage_targets"]
@@ -262,9 +280,6 @@ def main() -> int:
         )
     )
     project = args.project
-    if project in (3, 4):
-        print(f"error: project {project} is not yet implemented", file=sys.stderr)
-        return 2
     artifact_root = Path(str(settings["artifact_dir"]))
     timeout = float(settings["timeout"])
     if project == 2:
@@ -276,6 +291,18 @@ def main() -> int:
             ref_executable=Path("build/ref/p2sim"),
             user_executable=Path("build/user/p2sim"),
             project=2,
+            ref_assembler=Path("build/ref/p1asm"),
+            sim_args=("-n", "1000"),
+        )
+    elif project == 3:
+        fuzzer_config = FuzzerConfig(
+            workspace_root=args.workspace,
+            artifact_root=artifact_root,
+            timeout_seconds=timeout,
+            build_command=("make", "all", "PROJECT=3"),
+            ref_executable=Path("build/ref/p3sim"),
+            user_executable=Path("build/user/p3sim"),
+            project=3,
             ref_assembler=Path("build/ref/p1asm"),
             sim_args=("-n", "1000"),
         )
