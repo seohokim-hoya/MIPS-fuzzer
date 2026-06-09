@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import unittest
 
-from mips_fuzzer.generator import (
+from fuzzer.generator import (
     CoverageTracker,
     GeneratorConfig,
     ProgramGenerator,
@@ -15,6 +15,7 @@ from mips_fuzzer.generator import (
     resolve_priority_triple_targets,
     resolve_triplewise_targets,
 )
+from fuzzer.trace import TlbConfig, TraceGenerator, TraceGeneratorConfig
 
 
 class GeneratorTests(unittest.TestCase):
@@ -54,7 +55,9 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("la:two_word", collect_program_coverage(two_word).tags)
 
     def test_generator_can_produce_negative_memory_offsets(self) -> None:
-        program = self.generator.generate(200, preferred_targets={"mem_offset:negative"})
+        program = self.generator.generate(
+            200, preferred_targets={"mem_offset:negative"}
+        )
         coverage = collect_program_coverage(program)
         self.assertIn("mem_offset:negative", coverage.tags)
 
@@ -86,29 +89,32 @@ class GeneratorTests(unittest.TestCase):
             program = self.generator.generate(seed)
             coverage = collect_program_coverage(program)
             seen.update(tag for tag in coverage.tags if tag.startswith("opcode:"))
-        expected = {f"opcode:{opcode}" for opcode in [
-            "addiu",
-            "addu",
-            "and",
-            "andi",
-            "beq",
-            "bne",
-            "j",
-            "jal",
-            "jr",
-            "la",
-            "lui",
-            "lw",
-            "nor",
-            "or",
-            "ori",
-            "sll",
-            "sltiu",
-            "sltu",
-            "srl",
-            "subu",
-            "sw",
-        ]}
+        expected = {
+            f"opcode:{opcode}"
+            for opcode in [
+                "addiu",
+                "addu",
+                "and",
+                "andi",
+                "beq",
+                "bne",
+                "j",
+                "jal",
+                "jr",
+                "la",
+                "lui",
+                "lw",
+                "nor",
+                "or",
+                "ori",
+                "sll",
+                "sltiu",
+                "sltu",
+                "srl",
+                "subu",
+                "sw",
+            ]
+        }
         self.assertTrue(expected <= seen)
 
     def test_generator_can_disable_jr_for_stable_comparisons(self) -> None:
@@ -130,8 +136,12 @@ class GeneratorTests(unittest.TestCase):
         )
         generator = ProgramGenerator(config)
         self.assertNotIn("opcode:jr", resolve_coverage_targets(config))
-        self.assertFalse(any("opcode:jr" in tag for tag in resolve_pairwise_targets(config)))
-        self.assertFalse(any("opcode:jr" in tag for tag in resolve_priority_triple_targets(config)))
+        self.assertFalse(
+            any("opcode:jr" in tag for tag in resolve_pairwise_targets(config))
+        )
+        self.assertFalse(
+            any("opcode:jr" in tag for tag in resolve_priority_triple_targets(config))
+        )
         for seed in range(100):
             program = generator.generate(seed, complexity_tier="hard")
             coverage = collect_program_coverage(program, complexity_tier="hard")
@@ -156,8 +166,15 @@ class GeneratorTests(unittest.TestCase):
         )
         generator = ProgramGenerator(config)
         self.assertNotIn("branch:backward", resolve_coverage_targets(config))
-        self.assertFalse(any("branch:backward" in tag for tag in resolve_pairwise_targets(config)))
-        self.assertFalse(any("branch:backward" in tag for tag in resolve_priority_triple_targets(config)))
+        self.assertFalse(
+            any("branch:backward" in tag for tag in resolve_pairwise_targets(config))
+        )
+        self.assertFalse(
+            any(
+                "branch:backward" in tag
+                for tag in resolve_priority_triple_targets(config)
+            )
+        )
         for seed in range(100):
             program = generator.generate(seed, complexity_tier="hard")
             coverage = collect_program_coverage(program, complexity_tier="hard")
@@ -175,7 +192,10 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("data:empty", coverage.tags)
         self.assertIn("opcode:jal", coverage.tags)
         self.assertTrue(
-            any("data:empty" in pair and "opcode:jal" in pair for pair in coverage.pairwise_tags)
+            any(
+                "data:empty" in pair and "opcode:jal" in pair
+                for pair in coverage.pairwise_tags
+            )
         )
 
     def test_triplewise_targets_are_resolved_and_observable(self) -> None:
@@ -192,12 +212,16 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("format:hex", coverage.tags)
         self.assertTrue(
             any(
-                "data:non_empty" in triple and "branch:backward" in triple and "format:hex" in triple
+                "data:non_empty" in triple
+                and "branch:backward" in triple
+                and "format:hex" in triple
                 for triple in coverage.triplewise_tags
             )
         )
 
-    def test_coverage_tracker_prefers_missing_targets_then_pairs_then_triples(self) -> None:
+    def test_coverage_tracker_prefers_missing_targets_then_pairs_then_triples(
+        self,
+    ) -> None:
         tracker = CoverageTracker(
             resolve_coverage_targets(self.config),
             resolve_pairwise_targets(self.config),
@@ -210,8 +234,12 @@ class GeneratorTests(unittest.TestCase):
         tracker.observe(collect_program_coverage(program))
         next_preferred = tracker.preferred_targets("coverage_first")
         self.assertTrue(next_preferred)
-        tracker.single_counts.update({tag: 1 for tag in resolve_coverage_targets(self.config)})
-        tracker.pair_counts.update({tag: 1 for tag in resolve_pairwise_targets(self.config)})
+        tracker.single_counts.update(
+            {tag: 1 for tag in resolve_coverage_targets(self.config)}
+        )
+        tracker.pair_counts.update(
+            {tag: 1 for tag in resolve_pairwise_targets(self.config)}
+        )
         priority_next = tracker.preferred_targets("coverage_first")
         self.assertGreaterEqual(len(priority_next), 2)
 
@@ -219,10 +247,31 @@ class GeneratorTests(unittest.TestCase):
         priority_targets = resolve_priority_triple_targets(self.config)
         self.assertTrue(priority_targets)
         preferred = {"data:empty", "opcode:jal", "opcode:jr"}
-        program = self.generator.generate(612, preferred_targets=preferred, complexity_tier="hard")
+        program = self.generator.generate(
+            612, preferred_targets=preferred, complexity_tier="hard"
+        )
         coverage = collect_program_coverage(program, complexity_tier="hard")
         self.assertTrue(coverage.priority_triple_tags)
-        self.assertIn("triple:data:empty|opcode:jal|opcode:jr", coverage.priority_triple_tags)
+        self.assertIn(
+            "triple:data:empty|opcode:jal|opcode:jr", coverage.priority_triple_tags
+        )
+
+    def test_project4_trace_generator_renders_valid_trace(self) -> None:
+        generator = TraceGenerator(
+            TraceGeneratorConfig(min_accesses=16, max_accesses=16)
+        )
+        tlb_config = TlbConfig(entries=16, assoc=1)
+        trace = generator.generate(1234, tlb_config=tlb_config)
+        coverage = generator.collect_coverage(trace, tlb_config)
+
+        self.assertEqual(len(trace.accesses), 16)
+        self.assertIs(trace.tlb_config, tlb_config)
+        self.assertFalse(trace.validate())
+        for line in trace.render().splitlines():
+            self.assertRegex(line, r"^[RW] 0x[0-9a-f]{8}$")
+        self.assertIn("op:read", coverage.tags)
+        self.assertIn("op:write", coverage.tags)
+        self.assertIn("tlb_entries:16", coverage.tags)
 
     def test_small_exhaustive_scheduler_emits_representative_requests(self) -> None:
         scheduler = SmallExhaustiveScheduler(self.config)
@@ -250,8 +299,12 @@ class GeneratorTests(unittest.TestCase):
         for seed in range(20):
             simple_program = self.generator.generate(seed, complexity_tier="simple")
             hard_program = self.generator.generate(seed, complexity_tier="hard")
-            simple_total += simple_program.expanded_text_word_count() + len(simple_program.data_labels)
-            hard_total += hard_program.expanded_text_word_count() + len(hard_program.data_labels)
+            simple_total += simple_program.expanded_text_word_count() + len(
+                simple_program.data_labels
+            )
+            hard_total += hard_program.expanded_text_word_count() + len(
+                hard_program.data_labels
+            )
         self.assertGreater(hard_total, simple_total)
 
 

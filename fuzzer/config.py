@@ -30,6 +30,8 @@ DEFAULT_CONFIG: dict[str, object] = {
     "complexity_mode": "mixed",
     "complexity_ramp_interval": 250,
     "use_small_exhaustive_first": False,
+    "p4_min_accesses": 1,
+    "p4_max_accesses": 256,
 }
 
 

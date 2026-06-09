@@ -1,6 +1,6 @@
 # MIPS Fuzzer
 
-CS.30101 Architecture (KAIST) 과제 제출물을 자동으로 검증하는 differential fuzzer.
+CS.30101 Computer Organization (KAIST) 과제 제출물을 자동으로 검증하는 differential fuzzer.
 
 랜덤 MIPS 프로그램을 생성해 `ref`와 `user` 두 구현체의 실행 결과를 비교하고, 차이가 발생하면 해당 입력을 저장한다.
 
@@ -24,6 +24,7 @@ artifacts/          ← 차이가 발생한 테스트 케이스 저장
 | **P1** MIPS Assembler | `main.c` or `main.cpp`     | `main.c` or `main.cpp`     | (없음)                                    |
 | **P2** MIPS Simulator | `run.c`, `parse.c`         | `run.c`, `parse.c`         | `cs311.c`, `util.c`, `*.h`                |
 | **P3** Pipeline Sim   | `run.c`, `run.h`, `util.h` | `run.c`, `run.h`, `util.h` | `cs311.c`, `parse.c`, `parse.h`, `util.c` |
+| **P4** MMU Simulator  | `main.c` or `main.cpp`     | `main.c` or `main.cpp`     | `util.c`, `util.h`                        |
 
 ---
 
@@ -62,6 +63,16 @@ cp student_util.h runfiles/Project-3/user/util.h
 ./fuzz.py --project 3
 ```
 
+### Project 4 — MMU Simulator
+
+```bash
+# 1. 테스트할 제출물을 user/ 에 배치
+cp student_main.c runfiles/Project-4/user/main.c
+
+# 2. 실행
+./fuzz.py --project 4
+```
+
 다른 학생 제출물로 교체하려면 `user/` 안의 파일만 바꾸고 다시 실행하면 된다.
 
 ---
@@ -69,7 +80,7 @@ cp student_util.h runfiles/Project-3/user/util.h
 ## 주요 옵션
 
 ```
---project N    테스트할 프로젝트 번호 (1, 2, 또는 3, 기본값: 1)
+--project N    테스트할 프로젝트 번호 (1, 2, 3, 또는 4, 기본값: 1)
 --iters N      반복 횟수 (0 = 무한, 기본값: 0)
 --seed N       재현 가능한 테스트를 위한 시드 고정
 --timeout N    실행 제한 시간(초) (기본값: 2.0)
@@ -85,7 +96,7 @@ cp student_util.h runfiles/Project-3/user/util.h
 artifacts/
 ├── last_run/                              ← 가장 최근 테스트
 └── iter-000042-seed-1234567-mismatch/     ← 차이가 발생한 케이스
-    ├── input.s       ← 차이를 유발한 입력 프로그램
+    ├── input.s       ← 차이를 유발한 입력 프로그램 (P4는 input.trace)
     ├── diff.txt      ← ref vs user 비교 요약
     ├── ref.stdout    ← 레퍼런스 출력
     ├── user.stdout   ← 제출물 출력

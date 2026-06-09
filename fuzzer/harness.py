@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .model import Program
+from .trace import TraceProgram
 
 
 @dataclass
@@ -141,12 +142,12 @@ class FuzzerRunner:
             missing_targets=missing_targets,
         )
 
-    def evaluate_program(self, program: Program, seed: int, iteration: int) -> DiffResult:
+    def evaluate_program(self, program: Program | TraceProgram, seed: int, iteration: int) -> DiffResult:
         return self.evaluate_program_with_details(program, seed, iteration)
 
     def evaluate_program_with_details(
         self,
-        program: Program,
+        program: Program | TraceProgram,
         seed: int,
         iteration: int,
         program_details: dict[str, object] | None = None,
@@ -155,6 +156,10 @@ class FuzzerRunner:
         asm_text = program.render()
         with tempfile.TemporaryDirectory(prefix="mips-fuzz-") as temp_root:
             temp_path = Path(temp_root)
+            if self.config.project == 4:
+                if not isinstance(program, TraceProgram):
+                    raise TypeError("project 4 requires a TraceProgram")
+                return self._evaluate_p4(asm_text, program, seed, iteration, temp_path, program_details)
             if self.config.project in (2, 3):
                 return self._evaluate_p2(asm_text, seed, iteration, temp_path, program_details)
             return self._evaluate_p1(asm_text, seed, iteration, temp_path, program_details)
@@ -208,6 +213,62 @@ class FuzzerRunner:
             run_ref=run_ref,
             run_user=run_user,
             asm_text=asm_text,
+            diff_summary=diff_summary,
+        )
+
+    def _evaluate_p4(
+        self,
+        trace_text: str,
+        trace: TraceProgram,
+        seed: int,
+        iteration: int,
+        temp_path: Path,
+        program_details: dict[str, object] | None,
+    ) -> DiffResult:
+        if trace.tlb_config is None:
+            raise ValueError("project 4 trace is missing TLB configuration")
+        mmu_args = ["-c", trace.tlb_config.render(), "-x"]
+        run_ref = self._run_mmu("ref", self.ref_executable, temp_path / "ref", trace_text, mmu_args)
+        run_user = self._run_mmu("user", self.user_executable, temp_path / "user", trace_text, mmu_args)
+        failure_class, reason = classify_difference_p4(run_ref, run_user)
+        diff_summary = build_diff_summary_p4(run_ref, run_user, failure_class, reason)
+        self._save_last_run(
+            seed=seed,
+            iteration=iteration,
+            asm_text=trace_text,
+            failure_class=failure_class,
+            reason=reason,
+            run_ref=run_ref,
+            run_user=run_user,
+            diff_summary=diff_summary,
+            program_details=program_details,
+        )
+        interesting = failure_class is not None
+        artifact_dir = None
+        if interesting:
+            artifact_dir = self._save_artifacts(
+                seed=seed,
+                iteration=iteration,
+                asm_text=trace_text,
+                failure_class=failure_class,
+                reason=reason,
+                run_ref=run_ref,
+                run_user=run_user,
+                diff_summary=diff_summary,
+                program_details=program_details,
+            )
+        else:
+            diff_summary = None
+        return DiffResult(
+            iteration=iteration,
+            seed=seed,
+            interesting=interesting,
+            failure_class=failure_class,
+            reason=reason,
+            artifact_dir=artifact_dir,
+            run_ref=run_ref,
+            run_user=run_user,
+            asm_text=trace_text,
             diff_summary=diff_summary,
         )
 
@@ -427,6 +488,76 @@ class FuzzerRunner:
                 launch_error=str(exc),
             )
 
+    def _run_mmu(
+        self,
+        role: str,
+        executable: Path,
+        workdir: Path,
+        trace_text: str,
+        mmu_args: list[str],
+    ) -> RunResult:
+        workdir.mkdir(parents=True, exist_ok=True)
+        trace_path = workdir / "input.trace"
+        trace_path.write_text(trace_text, encoding="utf-8")
+        command = [str(executable)] + mmu_args + [str(trace_path)]
+        start = time.monotonic()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=self.config.timeout_seconds,
+            )
+            runtime = time.monotonic() - start
+            dump_path = workdir / "page_table_dump"
+            output_files = [dump_path] if dump_path.is_file() else []
+            output_bytes = dump_path.read_bytes() if dump_path.is_file() else None
+            return RunResult(
+                role=role,
+                executable=str(executable),
+                command=command,
+                return_code=completed.returncode,
+                timed_out=False,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                runtime_seconds=runtime,
+                output_files=output_files,
+                output_bytes=output_bytes,
+            )
+        except subprocess.TimeoutExpired as exc:
+            runtime = time.monotonic() - start
+            dump_path = workdir / "page_table_dump"
+            output_files = [dump_path] if dump_path.is_file() else []
+            output_bytes = dump_path.read_bytes() if dump_path.is_file() else None
+            return RunResult(
+                role=role,
+                executable=str(executable),
+                command=command,
+                return_code=None,
+                timed_out=True,
+                stdout=exc.stdout or "",
+                stderr=exc.stderr or "",
+                runtime_seconds=runtime,
+                output_files=output_files,
+                output_bytes=output_bytes,
+            )
+        except OSError as exc:
+            runtime = time.monotonic() - start
+            return RunResult(
+                role=role,
+                executable=str(executable),
+                command=command,
+                return_code=None,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                runtime_seconds=runtime,
+                output_files=[],
+                output_bytes=None,
+                launch_error=str(exc),
+            )
+
     def _save_artifacts(
         self,
         seed: int,
@@ -448,7 +579,7 @@ class FuzzerRunner:
             suffix += 1
         target.mkdir(parents=True, exist_ok=False)
 
-        (target / "input.s").write_text(asm_text, encoding="utf-8")
+        (target / self._input_filename()).write_text(asm_text, encoding="utf-8")
         if extra_input_files:
             for name, data in extra_input_files.items():
                 (target / name).write_bytes(data)
@@ -499,7 +630,7 @@ class FuzzerRunner:
         if temp_target.exists():
             shutil.rmtree(temp_target)
         temp_target.mkdir(parents=True, exist_ok=False)
-        (temp_target / "input.s").write_text(asm_text, encoding="utf-8")
+        (temp_target / self._input_filename()).write_text(asm_text, encoding="utf-8")
         if extra_input_files:
             for name, data in extra_input_files.items():
                 (temp_target / name).write_bytes(data)
@@ -539,12 +670,18 @@ class FuzzerRunner:
         (target / f"{prefix}.stdout").write_text(result.stdout, encoding="utf-8")
         (target / f"{prefix}.stderr").write_text(result.stderr, encoding="utf-8")
         if result.output_bytes is not None:
-            (target / f"{prefix}.o").write_bytes(result.output_bytes)
+            output_name = "page_table_dump" if self.config.project == 4 else "o"
+            (target / f"{prefix}.{output_name}").write_bytes(result.output_bytes)
         if result.output_files:
             listing = "\n".join(str(path) for path in result.output_files)
             (target / f"{prefix}.outputs.txt").write_text(listing + "\n", encoding="utf-8")
         if result.launch_error:
             (target / f"{prefix}.launch_error.txt").write_text(result.launch_error + "\n", encoding="utf-8")
+
+    def _input_filename(self) -> str:
+        if self.config.project == 4:
+            return "input.trace"
+        return "input.s"
 
 
 def classify_difference(run_ref: RunResult, run_user: RunResult) -> tuple[str | None, str]:
@@ -778,4 +915,85 @@ def build_diff_summary_p2(
     if diff_lines:
         lines.append("--- stdout diff ---")
         lines.extend(line.rstrip("\n") for line in diff_lines)
+    return DiffSummary(text="\n".join(lines), details=details)
+
+
+def classify_difference_p4(run_ref: RunResult, run_user: RunResult) -> tuple[str | None, str]:
+    if run_ref.launch_error != run_user.launch_error:
+        return "crash", "launcher failure differed between targets"
+    if run_ref.timed_out != run_user.timed_out:
+        return "timeout", "exactly one target timed out"
+    if run_ref.timed_out and run_user.timed_out:
+        return None, "both targets timed out"
+    if run_ref.return_code != run_user.return_code:
+        return "crash", "return codes differed"
+    if run_ref.stdout != run_user.stdout:
+        return "output_mismatch", "stdout output differed"
+    if run_ref.output_state != run_user.output_state:
+        return "output_mismatch", f"page_table_dump state differed: {run_ref.output_state} vs {run_user.output_state}"
+    if run_ref.output_bytes != run_user.output_bytes:
+        return "output_mismatch", "page_table_dump differed"
+    return None, "no differential behavior observed"
+
+
+def build_diff_summary_p4(
+    run_ref: RunResult,
+    run_user: RunResult,
+    failure_class: str | None,
+    reason: str,
+) -> DiffSummary:
+    details: dict[str, object] = {
+        "failure_class": failure_class,
+        "reason": reason,
+        "ref_return_code": run_ref.return_code,
+        "user_return_code": run_user.return_code,
+        "ref_timed_out": run_ref.timed_out,
+        "user_timed_out": run_user.timed_out,
+        "ref_dump_state": run_ref.output_state,
+        "user_dump_state": run_user.output_state,
+        "ref_dump_bytes": len(run_ref.output_bytes) if run_ref.output_bytes is not None else None,
+        "user_dump_bytes": len(run_user.output_bytes) if run_user.output_bytes is not None else None,
+    }
+    lines = [
+        f"failure-class: {failure_class}",
+        f"reason: {reason}",
+        f"ref: return={run_ref.return_code} timeout={run_ref.timed_out} dump={run_ref.output_state}",
+        f"user: return={run_user.return_code} timeout={run_user.timed_out} dump={run_user.output_state}",
+    ]
+
+    stdout_diff = list(
+        difflib.unified_diff(
+            run_ref.stdout.splitlines(keepends=True),
+            run_user.stdout.splitlines(keepends=True),
+            fromfile="ref.stdout",
+            tofile="user.stdout",
+            n=3,
+        )
+    )
+    details["stdout_diff_lines"] = len(stdout_diff)
+    if stdout_diff:
+        lines.append("--- stdout diff ---")
+        lines.extend(line.rstrip("\n") for line in stdout_diff)
+
+    if run_ref.output_bytes is not None and run_user.output_bytes is not None:
+        ref_dump = run_ref.output_bytes.decode("ascii", errors="replace")
+        user_dump = run_user.output_bytes.decode("ascii", errors="replace")
+        dump_diff = list(
+            difflib.unified_diff(
+                ref_dump.splitlines(keepends=True),
+                user_dump.splitlines(keepends=True),
+                fromfile="ref.page_table_dump",
+                tofile="user.page_table_dump",
+                n=3,
+            )
+        )
+        details["dump_diff_lines"] = len(dump_diff)
+        if dump_diff:
+            lines.append("--- page_table_dump diff ---")
+            lines.extend(line.rstrip("\n") for line in dump_diff[:200])
+            if len(dump_diff) > 200:
+                lines.append(f"... truncated {len(dump_diff) - 200} diff lines")
+    else:
+        details["dump_diff_lines"] = None
+
     return DiffSummary(text="\n".join(lines), details=details)

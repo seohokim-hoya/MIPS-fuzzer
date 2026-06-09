@@ -7,8 +7,8 @@ import sys
 import time
 from pathlib import Path
 
-from mips_fuzzer.config import DEFAULT_CONFIG, load_config
-from mips_fuzzer.generator import (
+from fuzzer.config import DEFAULT_CONFIG, load_config
+from fuzzer.generator import (
     CoverageTracker,
     GeneratorConfig,
     ProgramGenerator,
@@ -20,7 +20,8 @@ from mips_fuzzer.generator import (
     resolve_priority_triple_targets,
     resolve_triplewise_targets,
 )
-from mips_fuzzer.harness import FuzzerConfig, FuzzerRunner
+from fuzzer.harness import FuzzerConfig, FuzzerRunner
+from fuzzer.trace import TraceGenerator, TraceGeneratorConfig
 
 PRESET_SETTINGS: dict[str, dict[str, object]] = {
     "default": {},
@@ -184,10 +185,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         type=int,
-        choices=[1, 2, 3],
+        choices=[1, 2, 3, 4],
         default=1,
-        help="which project to fuzz: 1=assembler, 2=single-cycle simulator, 3=pipeline simulator (default: 1)",
+        help="which project to fuzz: 1=assembler, 2=single-cycle simulator, 3=pipeline simulator, 4=MMU simulator (default: 1)",
     )
+    parser.add_argument("--p4-min-accesses", type=int, default=None)
+    parser.add_argument("--p4-max-accesses", type=int, default=None)
     return parser.parse_args()
 
 
@@ -228,6 +231,8 @@ def resolve_settings(args: argparse.Namespace) -> tuple[Path, dict[str, object]]
         "complexity_mode": args.complexity_mode,
         "complexity_ramp_interval": args.complexity_ramp_interval,
         "use_small_exhaustive_first": args.use_small_exhaustive_first,
+        "p4_min_accesses": args.p4_min_accesses,
+        "p4_max_accesses": args.p4_max_accesses,
     }
     for key, value in overrides.items():
         if value is not None:
@@ -306,6 +311,16 @@ def main() -> int:
             ref_assembler=Path("build/ref/p1asm"),
             sim_args=("-n", "1000"),
         )
+    elif project == 4:
+        fuzzer_config = FuzzerConfig(
+            workspace_root=args.workspace,
+            artifact_root=artifact_root,
+            timeout_seconds=timeout,
+            build_command=("make", "all", "PROJECT=4"),
+            ref_executable=Path("build/ref/p4mmu"),
+            user_executable=Path("build/user/p4mmu"),
+            project=4,
+        )
     else:
         fuzzer_config = FuzzerConfig(
             workspace_root=args.workspace,
@@ -349,6 +364,17 @@ def main() -> int:
             joined = ", ".join(build_result.missing_targets)
             print(f"missing executables: {joined}", file=sys.stderr)
         return 2
+
+    if project == 4:
+        return run_project4(
+            runner=runner,
+            driver_rng=driver_rng,
+            master_seed=master_seed,
+            config_path=config_path,
+            settings=settings,
+            log_every=log_every,
+            max_iters=max_iters,
+        )
 
     print(f"project: {project}")
     print(f"master-seed: {master_seed}")
@@ -456,6 +482,77 @@ def main() -> int:
                 )
             if report_coverage_every > 0 and iteration % report_coverage_every == 0:
                 print(f"[coverage] {coverage_tracker.summary()}")
+    except KeyboardInterrupt:
+        print("stopped by user", file=sys.stderr)
+        return 130
+
+    elapsed = time.monotonic() - started_at
+    print(f"finished without mismatches checked={iteration} elapsed={elapsed:.1f}s")
+    return 0
+
+
+def run_project4(
+    *,
+    runner: FuzzerRunner,
+    driver_rng: random.Random,
+    master_seed: int,
+    config_path: Path,
+    settings: dict[str, object],
+    log_every: int,
+    max_iters: int,
+) -> int:
+    trace_generator = TraceGenerator(
+        TraceGeneratorConfig(
+            min_accesses=int(settings["p4_min_accesses"]),
+            max_accesses=int(settings["p4_max_accesses"]),
+        )
+    )
+    print("project: 4")
+    print(f"master-seed: {master_seed}")
+    print(f"config: {config_path}")
+    print(f"workspace: {runner.workspace_root}")
+    print(f"ref: {runner.ref_executable}")
+    print(f"user: {runner.user_executable}")
+    print(f"log-every: {log_every}")
+    print(f"p4-min-accesses: {trace_generator.config.min_accesses}")
+    print(f"p4-max-accesses: {trace_generator.config.max_accesses}")
+
+    iteration = 0
+    started_at = time.monotonic()
+    try:
+        while max_iters == 0 or iteration < max_iters:
+            case_seed = driver_rng.randrange(1 << 63)
+            tlb_config = trace_generator.pick_tlb_config(driver_rng)
+            trace = trace_generator.generate(case_seed, tlb_config=tlb_config)
+            coverage = trace_generator.collect_coverage(trace, tlb_config)
+            result = runner.evaluate_program_with_details(
+                trace,
+                seed=case_seed,
+                iteration=iteration,
+                program_details={"coverage": coverage.to_metadata()},
+            )
+            if result.interesting:
+                print(
+                    f"[{iteration:05d}] seed={case_seed} status={result.failure_class} "
+                    f"accesses={coverage.access_count} unique_pages={coverage.unique_pages} "
+                    f"tlb={tlb_config.render()}"
+                )
+                if result.artifact_dir is not None:
+                    print(f"saved={result.artifact_dir}")
+                print(f"reason={result.reason}")
+                print(f"coverage-tags={','.join(sorted(coverage.tags))}")
+                print(f"last-run={runner.artifact_root / 'last_run'}")
+                if result.diff_summary is not None:
+                    print(result.diff_summary.text)
+                return 1
+            iteration += 1
+            if log_every > 0 and iteration % log_every == 0:
+                elapsed = time.monotonic() - started_at
+                rate = iteration / elapsed if elapsed > 0 else 0.0
+                print(
+                    f"[progress] checked={iteration} elapsed={elapsed:.1f}s "
+                    f"rate={rate:.1f}/s last-seed={case_seed} tlb={tlb_config.render()}"
+                )
     except KeyboardInterrupt:
         print("stopped by user", file=sys.stderr)
         return 130

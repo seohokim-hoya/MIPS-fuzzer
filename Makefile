@@ -6,15 +6,19 @@ CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -pedantic
 LDFLAGS  ?=
 LDLIBS   ?=
 PROJECT  ?= 1
+P4_CFLAGS := $(filter-out -std=c11,$(CFLAGS)) -std=gnu11
 
 SHARED_P2 := shared/Project-2
 SHARED_P3 := shared/Project-3
+SHARED_P4 := shared/Project-4
 REF_P1    := runfiles/Project-1/ref
 USER_P1   := runfiles/Project-1/user
 REF_P2    := runfiles/Project-2/ref
 USER_P2   := runfiles/Project-2/user
 REF_P3    := runfiles/Project-3/ref
 USER_P3   := runfiles/Project-3/user
+REF_P4    := runfiles/Project-4/ref
+USER_P4   := runfiles/Project-4/user
 
 .PHONY: all ref user p1ref clean
 
@@ -79,6 +83,40 @@ user:
 		$(SHARED_P3)/cs311.c $(SHARED_P3)/util.c $(SHARED_P3)/parse.c \
 		$(USER_P3)/run.c \
 		-I$(USER_P3) -I$(SHARED_P3) $(LDLIBS) -o build/user/p3sim
+
+else ifeq ($(PROJECT),4)
+
+all: ref user
+
+ref:
+	@mkdir -p build/ref
+	@set -eu; \
+	if [ -f $(REF_P4)/main.c ] && [ -f $(REF_P4)/main.cpp ]; then \
+		echo "multiple entry files: $(REF_P4)/main.c and $(REF_P4)/main.cpp" >&2; exit 1; \
+	elif [ -f $(REF_P4)/main.c ]; then \
+		$(CC) -x c $(CPPFLAGS) $(P4_CFLAGS) $(LDFLAGS) \
+			$(SHARED_P4)/util.c $(REF_P4)/main.c -I$(SHARED_P4) $(LDLIBS) -o build/ref/p4mmu; \
+	elif [ -f $(REF_P4)/main.cpp ]; then \
+		$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) \
+			$(SHARED_P4)/util.c $(REF_P4)/main.cpp -I$(SHARED_P4) $(LDLIBS) -o build/ref/p4mmu; \
+	else \
+		echo "missing $(REF_P4)/main.c or $(REF_P4)/main.cpp" >&2; exit 1; \
+	fi
+
+user:
+	@mkdir -p build/user
+	@set -eu; \
+	if [ -f $(USER_P4)/main.c ] && [ -f $(USER_P4)/main.cpp ]; then \
+		echo "multiple entry files: $(USER_P4)/main.c and $(USER_P4)/main.cpp" >&2; exit 1; \
+	elif [ -f $(USER_P4)/main.c ]; then \
+		$(CC) -x c $(CPPFLAGS) $(P4_CFLAGS) $(LDFLAGS) \
+			$(SHARED_P4)/util.c $(USER_P4)/main.c -I$(SHARED_P4) $(LDLIBS) -o build/user/p4mmu; \
+	elif [ -f $(USER_P4)/main.cpp ]; then \
+		$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) \
+			$(SHARED_P4)/util.c $(USER_P4)/main.cpp -I$(SHARED_P4) $(LDLIBS) -o build/user/p4mmu; \
+	else \
+		echo "missing $(USER_P4)/main.c or $(USER_P4)/main.cpp" >&2; exit 1; \
+	fi
 
 else
 

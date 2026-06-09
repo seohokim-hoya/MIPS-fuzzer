@@ -8,5 +8,6 @@ build/
 __pycache__/
 *.o
 .codex
+.agents
 *.pdf
 sample/project*

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mips_fuzzer.config import load_config
+from fuzzer.config import load_config
 
 
 class ConfigTests(unittest.TestCase):
@@ -29,6 +29,8 @@ class ConfigTests(unittest.TestCase):
                         "complexity_mode: hard",
                         "complexity_ramp_interval: 99",
                         "use_small_exhaustive_first: on",
+                        "p4_min_accesses: 3",
+                        "p4_max_accesses: 17",
                     ]
                 )
                 + "\n",
@@ -46,10 +48,14 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(config["allow_jr"])
             self.assertFalse(config["allow_backward_control_flow"])
             self.assertEqual(config["coverage_mode"], "coverage_first")
-            self.assertEqual(config["coverage_targets"], ("opcode:lw", "mem_offset:negative"))
+            self.assertEqual(
+                config["coverage_targets"], ("opcode:lw", "mem_offset:negative")
+            )
             self.assertEqual(config["complexity_mode"], "hard")
             self.assertEqual(config["complexity_ramp_interval"], 99)
             self.assertTrue(config["use_small_exhaustive_first"])
+            self.assertEqual(config["p4_min_accesses"], 3)
+            self.assertEqual(config["p4_max_accesses"], 17)
 
     def test_load_config_rejects_unknown_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

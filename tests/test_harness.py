@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
-import subprocess
-import shutil
 
-from mips_fuzzer.generator import ProgramGenerator
-from mips_fuzzer.harness import FuzzerConfig, FuzzerRunner
-
+from fuzzer.generator import ProgramGenerator
+from fuzzer.harness import FuzzerConfig, FuzzerRunner
+from fuzzer.trace import TlbConfig, TraceGenerator, TraceGeneratorConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,16 +34,31 @@ def _write_workspace(
 
 
 def _write_project3_workspace(root: Path) -> None:
-    (root / "Makefile").write_text((REPO_ROOT / "Makefile").read_text(encoding="utf-8"), encoding="utf-8")
-    shutil.copytree(REPO_ROOT / "runfiles" / "Project-1", root / "runfiles" / "Project-1")
-    shutil.copytree(REPO_ROOT / "runfiles" / "Project-3", root / "runfiles" / "Project-3")
+    (root / "Makefile").write_text(
+        (REPO_ROOT / "Makefile").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    shutil.copytree(
+        REPO_ROOT / "runfiles" / "Project-1", root / "runfiles" / "Project-1"
+    )
+    shutil.copytree(
+        REPO_ROOT / "runfiles" / "Project-3", root / "runfiles" / "Project-3"
+    )
     shutil.copytree(REPO_ROOT / "shared" / "Project-3", root / "shared" / "Project-3")
+
+
+def _write_project4_workspace(root: Path) -> None:
+    (root / "Makefile").write_text(
+        (REPO_ROOT / "Makefile").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    shutil.copytree(
+        REPO_ROOT / "runfiles" / "Project-4", root / "runfiles" / "Project-4"
+    )
+    shutil.copytree(REPO_ROOT / "shared" / "Project-4", root / "shared" / "Project-4")
 
 
 def _constant_output_program(payload: str) -> str:
     escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         #include <stdio.h>
         #include <stdlib.h>
         #include <string.h>
@@ -74,14 +89,12 @@ def _constant_output_program(payload: str) -> str:
             fclose(out);
             return 0;
         }}
-        """
-    )
+        """)
 
 
 def _constant_output_program_cpp(payload: str) -> str:
     escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         #include <fstream>
         #include <string>
 
@@ -100,13 +113,11 @@ def _constant_output_program_cpp(payload: str) -> str:
             out << "{escaped}";
             return 0;
         }}
-        """
-    )
+        """)
 
 
 def _timeout_program() -> str:
-    return textwrap.dedent(
-        """\
+    return textwrap.dedent("""\
         #include <chrono>
         #include <thread>
 
@@ -114,8 +125,7 @@ def _timeout_program() -> str:
             std::this_thread::sleep_for(std::chrono::seconds(5));
             return 0;
         }
-        """
-    )
+        """)
 
 
 class HarnessTests(unittest.TestCase):
@@ -128,13 +138,17 @@ class HarnessTests(unittest.TestCase):
             source = _constant_output_program("same-output")
             _write_workspace(root, source, _constant_output_program_cpp("same-output"))
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             build_result = runner.build_targets()
             self.assertTrue(build_result.succeeded)
             self.assertTrue((root / "build" / "ref" / "p1asm").exists())
             self.assertTrue((root / "build" / "user" / "p1asm").exists())
 
-            result = runner.evaluate_program(self.generator.generate(1), seed=1, iteration=0)
+            result = runner.evaluate_program(
+                self.generator.generate(1), seed=1, iteration=0
+            )
             self.assertFalse(result.interesting)
             self.assertIsNone(result.failure_class)
             last_run = root / "artifacts" / "last_run"
@@ -151,10 +165,14 @@ class HarnessTests(unittest.TestCase):
                 _constant_output_program_cpp("user-output"),
             )
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             self.assertTrue(runner.build_targets().succeeded)
 
-            result = runner.evaluate_program(self.generator.generate(2), seed=2, iteration=3)
+            result = runner.evaluate_program(
+                self.generator.generate(2), seed=2, iteration=3
+            )
             self.assertTrue(result.interesting)
             self.assertEqual(result.failure_class, "output_mismatch")
             self.assertIsNotNone(result.artifact_dir)
@@ -175,7 +193,9 @@ class HarnessTests(unittest.TestCase):
             source = _constant_output_program("same-output")
             _write_workspace(root, source, _constant_output_program_cpp("same-output"))
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             self.assertTrue(runner.build_targets().succeeded)
 
             runner.evaluate_program(self.generator.generate(1), seed=10, iteration=1)
@@ -194,11 +214,16 @@ class HarnessTests(unittest.TestCase):
             root = Path(temp_dir)
             _write_workspace(root, _constant_output_program("ref-output"), None)
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             build_result = runner.build_targets()
             self.assertFalse(build_result.succeeded)
             self.assertEqual(build_result.reason, "build command failed")
-            self.assertIn("missing runfiles/Project-1/user/main.c or runfiles/Project-1/user/main.cpp", build_result.stderr)
+            self.assertIn(
+                "missing runfiles/Project-1/user/main.c or runfiles/Project-1/user/main.cpp",
+                build_result.stderr,
+            )
 
     def test_build_targets_support_cpp_reference_and_c_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -211,30 +236,47 @@ class HarnessTests(unittest.TestCase):
                 user_ext=".c",
             )
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             build_result = runner.build_targets()
             self.assertTrue(build_result.succeeded)
 
-            result = runner.evaluate_program(self.generator.generate(10), seed=10, iteration=1)
+            result = runner.evaluate_program(
+                self.generator.generate(10), seed=10, iteration=1
+            )
             self.assertFalse(result.interesting)
             self.assertIsNone(result.failure_class)
 
     def test_build_failure_when_both_entrypoints_exist(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            _write_workspace(root, _constant_output_program("ref-output"), _constant_output_program_cpp("user-output"))
-            (root / "runfiles" / "Project-1" / "user" / "main.c").write_text(_constant_output_program("other-user"), encoding="utf-8")
+            _write_workspace(
+                root,
+                _constant_output_program("ref-output"),
+                _constant_output_program_cpp("user-output"),
+            )
+            (root / "runfiles" / "Project-1" / "user" / "main.c").write_text(
+                _constant_output_program("other-user"), encoding="utf-8"
+            )
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             build_result = runner.build_targets()
             self.assertFalse(build_result.succeeded)
             self.assertEqual(build_result.reason, "build command failed")
-            self.assertIn("multiple entry files: runfiles/Project-1/user/main.c and runfiles/Project-1/user/main.cpp", build_result.stderr)
+            self.assertIn(
+                "multiple entry files: runfiles/Project-1/user/main.c and runfiles/Project-1/user/main.cpp",
+                build_result.stderr,
+            )
 
     def test_timeout_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            _write_workspace(root, _constant_output_program("ref-output"), _timeout_program())
+            _write_workspace(
+                root, _constant_output_program("ref-output"), _timeout_program()
+            )
 
             runner = FuzzerRunner(
                 FuzzerConfig(
@@ -245,24 +287,33 @@ class HarnessTests(unittest.TestCase):
             )
             self.assertTrue(runner.build_targets().succeeded)
 
-            result = runner.evaluate_program(self.generator.generate(4), seed=4, iteration=5)
+            result = runner.evaluate_program(
+                self.generator.generate(4), seed=4, iteration=5
+            )
             self.assertTrue(result.interesting)
             self.assertEqual(result.failure_class, "timeout")
 
     def test_current_user_cpp_accepts_hex_signed_16bit_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            sample_source = (REPO_ROOT / "runfiles" / "Project-1" / "ref" / "main.c").read_text(encoding="utf-8")
-            user_source = (REPO_ROOT / "runfiles" / "Project-1" / "user" / "main.cpp").read_text(encoding="utf-8")
-            _write_workspace(root, sample_source, user_source, sample_ext=".c", user_ext=".cpp")
+            sample_source = (
+                REPO_ROOT / "runfiles" / "Project-1" / "ref" / "main.c"
+            ).read_text(encoding="utf-8")
+            user_source = (
+                REPO_ROOT / "runfiles" / "Project-1" / "user" / "main.cpp"
+            ).read_text(encoding="utf-8")
+            _write_workspace(
+                root, sample_source, user_source, sample_ext=".c", user_ext=".cpp"
+            )
 
-            runner = FuzzerRunner(FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts"))
+            runner = FuzzerRunner(
+                FuzzerConfig(workspace_root=root, artifact_root=root / "artifacts")
+            )
             self.assertTrue(runner.build_targets().succeeded)
 
             input_path = root / "hex-signed.s"
             input_path.write_text(
-                textwrap.dedent(
-                    """\
+                textwrap.dedent("""\
                     .data
                     .text
                     text_0:
@@ -277,8 +328,7 @@ class HarnessTests(unittest.TestCase):
                     addiu $20, $30, 0xe1d1
                     text_1:
                     sll $16, $24, 0x03
-                    """
-                ),
+                    """),
                 encoding="utf-8",
             )
 
@@ -324,13 +374,52 @@ class HarnessTests(unittest.TestCase):
             self.assertTrue((root / "build" / "ref" / "p3sim").exists())
             self.assertTrue((root / "build" / "user" / "p3sim").exists())
 
-            result = runner.evaluate_program(self.generator.generate(3), seed=3, iteration=0)
+            result = runner.evaluate_program(
+                self.generator.generate(3), seed=3, iteration=0
+            )
             self.assertFalse(result.interesting)
             self.assertIsNone(result.failure_class)
             last_run = root / "artifacts" / "last_run"
             self.assertTrue((last_run / "input.s").exists())
             self.assertTrue((last_run / "input.o").exists())
-            self.assertIn('"project": 3', (last_run / "meta.json").read_text(encoding="utf-8"))
+            self.assertIn(
+                '"project": 3', (last_run / "meta.json").read_text(encoding="utf-8")
+            )
+
+    def test_project4_builds_and_runs_identical_mmu_simulators(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_project4_workspace(root)
+
+            runner = FuzzerRunner(
+                FuzzerConfig(
+                    workspace_root=root,
+                    artifact_root=root / "artifacts",
+                    build_command=("make", "all", "PROJECT=4"),
+                    ref_executable=Path("build/ref/p4mmu"),
+                    user_executable=Path("build/user/p4mmu"),
+                    project=4,
+                )
+            )
+            build_result = runner.build_targets()
+            self.assertTrue(build_result.succeeded, build_result.stderr)
+            self.assertTrue((root / "build" / "ref" / "p4mmu").exists())
+            self.assertTrue((root / "build" / "user" / "p4mmu").exists())
+
+            generator = TraceGenerator(
+                TraceGeneratorConfig(min_accesses=32, max_accesses=32)
+            )
+            trace = generator.generate(44, tlb_config=TlbConfig(entries=32, assoc=2))
+            result = runner.evaluate_program(trace, seed=44, iteration=0)
+            self.assertFalse(result.interesting)
+            self.assertIsNone(result.failure_class)
+            last_run = root / "artifacts" / "last_run"
+            self.assertTrue((last_run / "input.trace").exists())
+            self.assertTrue((last_run / "ref.page_table_dump").exists())
+            self.assertTrue((last_run / "user.page_table_dump").exists())
+            self.assertIn(
+                '"project": 4', (last_run / "meta.json").read_text(encoding="utf-8")
+            )
 
 
 if __name__ == "__main__":
